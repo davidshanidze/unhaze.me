@@ -35,19 +35,26 @@
         <circle cx="12" cy="12" r="10"/>
       </svg>
     );
+    const Clock = () => (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+      </svg>
+    );
 
     function App() {
       const [currentDay, setCurrentDay] = useState(null);
       const [answers, setAnswers] = useState({});
       const [currentAnswer, setCurrentAnswer] = useState('');
       const [completedDays, setCompletedDays] = useState([]);
+      const [startDate, setStartDate] = useState(null);
       const [displayedStory, setDisplayedStory] = useState('');
       const [isTyping, setIsTyping] = useState(false);
+      const [currentTime, setCurrentTime] = useState(new Date());
 
       const days = [
         { day: 1, chapter: 'The Fog', title: 'Who Are You?', color: '#8B9DC3',
           story: `You wake up in the fog. You don't remember how you got here. Only your name echoes inside. Everything else is empty.\n\nBut you feel it: you're not a random traveler. There was something strong in you. You just forgot.`,
-          task: 'Write down 3 words that described you before the fog.',
+          task: 'Write down 3 words that described you before the fog. What were you like? Not perfect, but real.',
           placeholder: 'Example: Alive. Playful. Restless...' },
         { day: 2, chapter: 'The Fog', title: 'What Stayed?', color: '#8B9DC3',
           story: `The fog is still thick, but you begin to feel something inside—a quiet presence. Something survived.\n\nEven if almost everything was erased, you carried something with you.`,
@@ -107,9 +114,16 @@
         try {
           const saved = localStorage.getItem('unhaze_answers');
           const savedCompleted = localStorage.getItem('unhaze_completed');
+          const savedStart = localStorage.getItem('unhaze_start_date');
           if (saved) setAnswers(JSON.parse(saved));
           if (savedCompleted) setCompletedDays(JSON.parse(savedCompleted));
+          if (savedStart) setStartDate(new Date(savedStart));
         } catch (e) { console.log('Storage error:', e); }
+      }, []);
+
+      useEffect(() => {
+        const timer = setInterval(() => setCurrentTime(new Date()), 60000);
+        return () => clearInterval(timer);
       }, []);
 
       useEffect(() => {
@@ -131,6 +145,14 @@
 
       const saveAnswer = () => {
         if (!currentAnswer.trim()) return;
+        
+        let newStartDate = startDate;
+        if (!startDate) {
+          newStartDate = new Date();
+          setStartDate(newStartDate);
+          localStorage.setItem('unhaze_start_date', newStartDate.toISOString());
+        }
+        
         const newAnswers = { ...answers, [currentDay.day]: currentAnswer };
         const newCompleted = [...new Set([...completedDays, currentDay.day])];
         setAnswers(newAnswers);
@@ -152,7 +174,224 @@
         }, 300);
       };
 
-      const isUnlocked = (dayNum) => dayNum === 1 || completedDays.includes(dayNum - 1);
+      const getDayStatus = (dayNum) => {
+        const completed = completedDays.includes(dayNum);
+        if (completed) return { status: 'completed', unlocked: true };
+        
+        if (dayNum === 1) return { status: 'available', unlocked: true };
+        
+        const prevCompleted = completedDays.includes(dayNum - 1);
+        if (!prevCompleted) return { status: 'locked-prev', unlocked: false };
+        
+        if (!startDate) return { status: 'locked-prev', unlocked: false };
+        
+        const daysSinceStart = Math.floor((currentTime - startDate) / (1000 * 60 * 60 * 24));
+        const requiredDay = dayNum - 1;
+        
+        if (daysSinceStart >= requiredDay) {
+          return { status: 'available', unlocked: true };
+        } else {
+          const hoursUntilUnlock = (requiredDay - daysSinceStart) * 24 - Math.floor((currentTime - startDate) / (1000 * 60 * 60)) % 24;
+          return { 
+            status: 'locked-time', 
+            unlocked: false,
+            hoursLeft: hoursUntilUnlock
+          };
+        }
+      };
+
+      const getTimeRemaining = (hours) => {
+        const h = Math.floor(hours);
+        const m = Math.floor((hours - h) * 60);
+        return `${h}h ${m}m`;
+      };
+
+      const getJourneyStats = () => {
+        if (!startDate) return null;
+        const daysSince = Math.floor((currentTime - startDate) / (1000 * 60 * 60 * 24));
+        return {
+          daysStarted: daysSince + 1,
+          completed: completedDays.length
+        };
+      };
+
+      const JourneyMap = () => {
+        const mapWidth = 800;
+        const mapHeight = 600;
+        const padding = 60;
+        
+        const getNodePosition = (index) => {
+          const cols = 4;
+          const row = Math.floor(index / cols);
+          const col = index % cols;
+          
+          const xSpacing = (mapWidth - padding * 2) / (cols - 1);
+          const ySpacing = (mapHeight - padding * 2) / 3;
+          
+          const x = padding + col * xSpacing;
+          const y = padding + row * ySpacing;
+          
+          const wobble = (index % 2 === 0 ? 15 : -15);
+          return { x: x + wobble, y };
+        };
+
+        const getPathBetween = (index1, index2) => {
+          const p1 = getNodePosition(index1);
+          const p2 = getNodePosition(index2);
+          
+          const midX = (p1.x + p2.x) / 2;
+          const midY = (p1.y + p2.y) / 2;
+          const curve = 30;
+          
+          return `M ${p1.x} ${p1.y} Q ${midX} ${midY + curve} ${p2.x} ${p2.y}`;
+        };
+
+        return (
+          <div style={{ 
+            width: '100%', 
+            maxWidth: '900px', 
+            margin: '0 auto 3rem',
+            overflowX: 'auto'
+          }}>
+            <svg 
+              viewBox={`0 0 ${mapWidth} ${mapHeight}`} 
+              style={{ width: '100%', height: 'auto' }}
+            >
+              <defs>
+                <linearGradient id="pathGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" style={{ stopColor: '#475569', stopOpacity: 0.3 }} />
+                  <stop offset="100%" style={{ stopColor: '#6366f1', stopOpacity: 0.6 }} />
+                </linearGradient>
+                <filter id="glow">
+                  <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+                  <feMerge>
+                    <feMergeNode in="coloredBlur"/>
+                    <feMergeNode in="SourceGraphic"/>
+                  </feMerge>
+                </filter>
+              </defs>
+
+              {days.slice(0, -1).map((day, i) => {
+                const status = getDayStatus(day.day);
+                const nextStatus = getDayStatus(days[i + 1].day);
+                const pathColor = status.status === 'completed' 
+                  ? day.color 
+                  : 'url(#pathGradient)';
+                
+                return (
+                  <path
+                    key={`path-${i}`}
+                    d={getPathBetween(i, i + 1)}
+                    fill="none"
+                    stroke={pathColor}
+                    strokeWidth="3"
+                    strokeDasharray={status.status === 'completed' ? '0' : '8 4'}
+                    opacity={status.status === 'completed' ? 0.8 : 0.3}
+                    style={{ transition: 'all 0.5s ease' }}
+                  />
+                );
+              })}
+
+              {days.map((day, index) => {
+                const pos = getNodePosition(index);
+                const status = getDayStatus(day.day);
+                
+                let nodeColor = '#334155';
+                let nodeOpacity = 0.3;
+                let ringColor = '#475569';
+                let textColor = '#64748b';
+                
+                if (status.status === 'completed') {
+                  nodeColor = day.color;
+                  nodeOpacity = 1;
+                  ringColor = day.color;
+                  textColor = '#fff';
+                } else if (status.status === 'available') {
+                  nodeColor = day.color;
+                  nodeOpacity = 0.7;
+                  ringColor = day.color;
+                  textColor = '#e2e8f0';
+                }
+                
+                return (
+                  <g 
+                    key={`node-${index}`} 
+                    style={{ cursor: status.unlocked ? 'pointer' : 'default' }}
+                    onClick={() => status.unlocked && startDay(day)}
+                  >
+                    {status.status === 'available' && (
+                      <circle
+                        cx={pos.x}
+                        cy={pos.y}
+                        r="22"
+                        fill="none"
+                        stroke={ringColor}
+                        strokeWidth="2"
+                        opacity="0.5"
+                      >
+                        <animate
+                          attributeName="r"
+                          values="22;28;22"
+                          dur="2s"
+                          repeatCount="indefinite"
+                        />
+                        <animate
+                          attributeName="opacity"
+                          values="0.5;0.1;0.5"
+                          dur="2s"
+                          repeatCount="indefinite"
+                        />
+                      </circle>
+                    )}
+                    
+                    <circle
+                      cx={pos.x}
+                      cy={pos.y}
+                      r="18"
+                      fill={nodeColor}
+                      opacity={nodeOpacity}
+                      filter={status.status === 'completed' ? 'url(#glow)' : ''}
+                      style={{ transition: 'all 0.3s ease' }}
+                    />
+                    
+                    {status.status === 'completed' && (
+                      <g transform={`translate(${pos.x - 8}, ${pos.y - 8})`}>
+                        <path
+                          d="M13 8l-4 4-2-2"
+                          fill="none"
+                          stroke="#fff"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </g>
+                    )}
+                    
+                    {!status.unlocked && (
+                      <g transform={`translate(${pos.x - 6}, ${pos.y - 8})`}>
+                        <rect x="1" y="5" width="10" height="7" rx="1" fill="none" stroke={textColor} strokeWidth="1.5"/>
+                        <path d="M3 5V3a3 3 0 0 1 6 0v2" fill="none" stroke={textColor} strokeWidth="1.5"/>
+                      </g>
+                    )}
+                    
+                    <text
+                      x={pos.x}
+                      y={pos.y + 35}
+                      textAnchor="middle"
+                      fill={textColor}
+                      fontSize="11"
+                      fontWeight="600"
+                      style={{ transition: 'all 0.3s ease' }}
+                    >
+                      Day {day.day}
+                    </text>
+                  </g>
+                );
+              })}
+            </svg>
+          </div>
+        );
+      };
 
       if (currentDay) {
         return (
@@ -181,7 +420,7 @@
                   fontSize: '0.875rem'
                 }}
               >
-                ← Back
+                ← Back to Journey
               </button>
               
               <div style={{ marginBottom: '2rem' }}>
@@ -282,6 +521,8 @@
         );
       }
 
+      const stats = getJourneyStats();
+
       return (
         <div style={{
           minHeight: '100vh',
@@ -290,7 +531,7 @@
           padding: '1.5rem'
         }}>
           <div style={{ maxWidth: '64rem', margin: '0 auto' }}>
-            <div style={{ textAlign: 'center', marginBottom: '4rem', paddingTop: '2rem' }}>
+            <div style={{ textAlign: 'center', marginBottom: '3rem', paddingTop: '2rem' }}>
               <h1 style={{
                 fontSize: '4rem',
                 fontWeight: '900',
@@ -302,10 +543,17 @@
               }}>
                 UNHAZE
               </h1>
-              <p style={{ fontSize: '1.25rem', color: '#94a3b8' }}>
+              <p style={{ fontSize: '1.25rem', color: '#94a3b8', marginBottom: '0.5rem' }}>
                 A 14-Day Journey Back to Yourself
               </p>
+              {stats && (
+                <p style={{ fontSize: '0.875rem', color: '#64748b' }}>
+                  Journey started {stats.daysStarted} {stats.daysStarted === 1 ? 'day' : 'days'} ago • {stats.completed}/14 completed
+                </p>
+              )}
             </div>
+
+            <JourneyMap />
 
             <div style={{
               marginBottom: '2rem',
@@ -337,8 +585,22 @@
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               {days.map((day) => {
-                const unlocked = isUnlocked(day.day);
-                const completed = completedDays.includes(day.day);
+                const dayStatus = getDayStatus(day.day);
+                const { status, unlocked, hoursLeft } = dayStatus;
+                
+                let statusBadge = null;
+                let statusColor = '#64748b';
+                
+                if (status === 'completed') {
+                  statusBadge = { text: 'Completed', color: '#10b981', bg: '#10b98120' };
+                } else if (status === 'available') {
+                  statusBadge = { text: 'Available Now', color: '#6366f1', bg: '#6366f120' };
+                } else if (status === 'locked-time') {
+                  statusBadge = { text: `Unlocks in ${getTimeRemaining(hoursLeft)}`, color: '#f59e0b', bg: '#f59e0b20' };
+                } else {
+                  statusBadge = { text: 'Complete previous day', color: '#64748b', bg: '#64748b20' };
+                }
+                
                 return (
                   <button
                     key={day.day}
@@ -350,49 +612,67 @@
                       padding: '1.5rem',
                       borderRadius: '1rem',
                       border: '2px solid',
-                      borderColor: unlocked ? 'rgba(51, 65, 85, 0.5)' : 'rgba(51, 65, 85, 0.3)',
+                      borderColor: unlocked ? (status === 'completed' ? day.color + '80' : 'rgba(99, 102, 241, 0.5)') : 'rgba(51, 65, 85, 0.3)',
                       backgroundColor: unlocked ? 'rgba(30, 41, 59, 0.4)' : 'rgba(15, 23, 42, 0.3)',
                       backdropFilter: 'blur(16px)',
                       cursor: unlocked ? 'pointer' : 'not-allowed',
-                      opacity: unlocked ? 1 : 0.5,
-                      transition: 'all 0.3s'
+                      opacity: unlocked ? 1 : 0.6,
+                      transition: 'all 0.3s',
+                      transform: unlocked ? 'scale(1)' : 'scale(0.98)'
                     }}
                   >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '0.5rem' }}>
-                          <span style={{ color: '#64748b', fontSize: '0.875rem' }}>DAY {day.day}</span>
-                          <span style={{
-                            fontSize: '0.75rem',
-                            padding: '0.125rem 0.5rem',
-                            borderRadius: '9999px',
-                            backgroundColor: 'rgba(51, 65, 85, 0.5)',
-                            color: '#94a3b8'
-                          }}>
-                            {day.chapter}
-                          </span>
-                        </div>
-                        <h3 style={{ fontSize: '1.5rem', fontWeight: '700', marginBottom: '0.5rem' }}>
-                          {day.title}
-                        </h3>
-                        <p style={{ color: '#94a3b8', fontSize: '0.875rem' }}>
-                          {day.story.substring(0, 80)}...
-                        </p>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '0.75rem' }}>
+                      <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                        <span style={{ color: '#64748b', fontSize: '0.875rem', fontWeight: '600' }}>DAY {day.day}</span>
+                        <span style={{
+                          fontSize: '0.75rem',
+                          padding: '0.125rem 0.5rem',
+                          borderRadius: '9999px',
+                          backgroundColor: 'rgba(51, 65, 85, 0.5)',
+                          color: '#94a3b8'
+                        }}>
+                          {day.chapter}
+                        </span>
                       </div>
-                      <div>
-                        {!unlocked ? <Lock /> : completed ? <CheckCircle /> : <Circle />}
-                      </div>
+                      <span style={{
+                        fontSize: '0.75rem',
+                        padding: '0.25rem 0.75rem',
+                        borderRadius: '9999px',
+                        backgroundColor: statusBadge.bg,
+                        color: statusBadge.color,
+                        fontWeight: '600',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.25rem'
+                      }}>
+                        {status === 'locked-time' && <Clock />}
+                        {statusBadge.text}
+                      </span>
                     </div>
+                    
+                    <h3 style={{ 
+                      fontSize: '1.5rem', 
+                      fontWeight: '700', 
+                      marginBottom: '0.5rem',
+                      color: status === 'completed' ? day.color : '#e2e8f0'
+                    }}>
+                      {day.title}
+                    </h3>
+                    <p style={{ color: '#94a3b8', fontSize: '0.875rem' }}>
+                      {day.story.substring(0, 80)}...
+                    </p>
+                    
                     {unlocked && (
                       <div style={{
                         marginTop: '1rem',
                         display: 'flex',
                         alignItems: 'center',
                         gap: '0.5rem',
-                        color: '#818cf8',
-                        fontSize: '0.875rem'
+                        color: status === 'completed' ? day.color : '#818cf8',
+                        fontSize: '0.875rem',
+                        fontWeight: '600'
                       }}>
-                        {completed ? 'Review' : 'Begin'} <ArrowRight />
+                        {status === 'completed' ? 'Review your answer' : 'Begin this day'} <ArrowRight />
                       </div>
                     )}
                   </button>
