@@ -122,7 +122,7 @@
       }, []);
 
       useEffect(() => {
-        const timer = setInterval(() => setCurrentTime(new Date()), 60000);
+        const timer = setInterval(() => setCurrentTime(new Date()), 1000);
         return () => clearInterval(timer);
       }, []);
 
@@ -185,24 +185,45 @@
         
         if (!startDate) return { status: 'locked-prev', unlocked: false };
         
-        const daysSinceStart = Math.floor((currentTime - startDate) / (1000 * 60 * 60 * 24));
+        // Calculate days since start based on calendar days (midnight to midnight)
+        const startDay = new Date(startDate);
+        startDay.setHours(0, 0, 0, 0);
+        
+        const today = new Date(currentTime);
+        today.setHours(0, 0, 0, 0);
+        
+        const daysSinceStart = Math.floor((today - startDay) / (1000 * 60 * 60 * 24));
         const requiredDay = dayNum - 1;
         
         if (daysSinceStart >= requiredDay) {
           return { status: 'available', unlocked: true };
         } else {
-          const hoursUntilUnlock = (requiredDay - daysSinceStart) * 24 - Math.floor((currentTime - startDate) / (1000 * 60 * 60)) % 24;
+          // Calculate time until next midnight
+          const tomorrow = new Date(currentTime);
+          tomorrow.setHours(24, 0, 0, 0);
+          const msUntilMidnight = tomorrow - currentTime;
+          const hoursUntilMidnight = msUntilMidnight / (1000 * 60 * 60);
+          
+          // Add full days needed
+          const daysNeeded = requiredDay - daysSinceStart;
+          const totalHours = hoursUntilMidnight + (daysNeeded - 1) * 24;
+          
           return { 
             status: 'locked-time', 
             unlocked: false,
-            hoursLeft: hoursUntilUnlock
+            hoursLeft: totalHours
           };
         }
       };
 
       const getTimeRemaining = (hours) => {
-        const h = Math.floor(hours);
-        const m = Math.floor((hours - h) * 60);
+        const totalMinutes = Math.ceil(hours * 60);
+        const h = Math.floor(totalMinutes / 60);
+        const m = totalMinutes % 60;
+        
+        if (h === 0) {
+          return `${m}m`;
+        }
         return `${h}h ${m}m`;
       };
 
